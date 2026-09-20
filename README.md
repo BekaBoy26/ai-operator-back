@@ -11,6 +11,7 @@ Backend API for **Opero** — a personal workspace with an AI assistant that wor
 - [Quick start](#quick-start)
 - [Environment variables](#environment-variables)
 - [npm scripts](#npm-scripts)
+- [Database on Neon](#database-on-neon)
 - [Google setup](#google-setup)
 - [API overview](#api-overview)
 - [Authentication and security](#authentication-and-security)
@@ -63,7 +64,9 @@ Copy `.env.example` to `.env`.
 | `FRONTEND_URL` | yes | Origin of the web client (CORS, redirects, links in e-mails) |
 | `NODE_ENV` | no | `development` or `production` (production enables `secure` cookies and strict secret checks) |
 | `COOKIE_SAMESITE` | no | `lax` (default) when front end and API share a site; `none` for different domains (requires HTTPS) |
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | PostgreSQL connection |
+| `DATABASE_URL` | one of the two | Connection string of a cloud PostgreSQL such as [Neon](https://neon.tech). When set, `DB_*` are ignored |
+| `DATABASE_URL_UNPOOLED` | no | Direct (non-pooler) connection string, used only by `npm run migrate` |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | one of the two | Local PostgreSQL (used when `DATABASE_URL` is empty) |
 | `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | yes | JWT secrets, **at least 32 random characters**, different from each other |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | yes | OAuth client from Google Cloud Console |
 | `GOOGLE_CALLBACK_URL` | yes | `http://localhost:5000/auth/google-callback` (must match the OAuth client exactly) |
@@ -86,6 +89,21 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 | `npm run typecheck` | TypeScript check without emitting files |
 | `npm run build` | Compiles to `dist/` |
 | `npm start` | Runs the compiled server (`node dist/index.js`) |
+
+## Database on Neon
+
+1. In the Neon console open your branch → **Connect** → **Postgres database**, keep *Connection pooling* on and copy the connection string.
+2. Put it into `.env` as `DATABASE_URL` (with your real password):
+   `DATABASE_URL=postgresql://neondb_owner:<PASSWORD>@<host>-pooler.<region>.aws.neon.tech/neondb?sslmode=require&channel_binding=require`
+3. Create the tables: `npm run migrate`, then start the server: `npm run dev`. The log should say `DB Connected (<host>/neondb)`.
+
+Notes:
+
+- TLS is always on and the server certificate is verified (`sslmode=require` is treated as `verify-full`).
+- The database starts empty — register again (or move your data with `pg_dump` / `pg_restore`).
+- A Neon compute can be suspended when idle; the first request after a pause may take a few seconds.
+- If your password contains special characters they must be URL-encoded (the Neon snippet already does this).
+- For migrations Neon recommends a direct connection: put the non-pooled string into `DATABASE_URL_UNPOOLED` (optional).
 
 ## Google setup
 
@@ -190,6 +208,7 @@ Backend API для **Opero** — персонального рабочего п�
 - [Быстрый старт](#быстрый-старт)
 - [Переменные окружения](#переменные-окружения)
 - [npm-скрипты](#npm-скрипты)
+- [База данных на Neon](#база-данных-на-neon)
 - [Настройка Google](#настройка-google)
 - [Обзор API](#обзор-api)
 - [Аутентификация и безопасность](#аутентификация-и-безопасность)
@@ -242,7 +261,9 @@ npm run dev              # http://localhost:5000
 | `FRONTEND_URL` | да | Адрес веб-клиента (CORS, редиректы, ссылки в письмах) |
 | `NODE_ENV` | нет | `development` или `production` (в production включаются `secure`-cookie и строгая проверка секретов) |
 | `COOKIE_SAMESITE` | нет | `lax` (по умолчанию), если клиент и API на одном сайте; `none` для разных доменов (нужен HTTPS) |
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | да | Подключение к PostgreSQL |
+| `DATABASE_URL` | одно из двух | Строка подключения к облачному PostgreSQL, например [Neon](https://neon.tech). Если задана, `DB_*` игнорируются |
+| `DATABASE_URL_UNPOOLED` | нет | Прямая строка подключения (не через pooler), используется только в `npm run migrate` |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | одно из двух | Локальный PostgreSQL (используется, когда `DATABASE_URL` пуст) |
 | `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | да | Секреты JWT, **не короче 32 случайных символов**, разные между собой |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | да | OAuth-клиент из Google Cloud Console |
 | `GOOGLE_CALLBACK_URL` | да | `http://localhost:5000/auth/google-callback` (должен точно совпадать с адресом в OAuth-клиенте) |
@@ -265,6 +286,21 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 | `npm run typecheck` | Проверка типов TypeScript без сборки |
 | `npm run build` | Компиляция в `dist/` |
 | `npm start` | Запуск собранного сервера (`node dist/index.js`) |
+
+## База данных на Neon
+
+1. В консоли Neon откройте свою ветку → **Connect** → **Postgres database**, оставьте включённым *Connection pooling* и скопируйте строку подключения.
+2. Вставьте её в `.env` как `DATABASE_URL` (с настоящим паролем):
+   `DATABASE_URL=postgresql://neondb_owner:<PASSWORD>@<host>-pooler.<region>.aws.neon.tech/neondb?sslmode=require&channel_binding=require`
+3. Создайте таблицы: `npm run migrate`, затем запустите сервер: `npm run dev`. В логе должно появиться `DB Connected (<host>/neondb)`.
+
+Примечания:
+
+- TLS включён всегда, сертификат сервера проверяется (`sslmode=require` трактуется как `verify-full`).
+- База начинает пустой — зарегистрируйтесь заново (или перенесите данные через `pg_dump` / `pg_restore`).
+- Вычислительный узел Neon засыпает без нагрузки; первый запрос после паузы может занять несколько секунд.
+- Если в пароле есть спецсимволы, они должны быть закодированы в URL (сниппет из Neon уже так делает).
+- Для миграций Neon рекомендует прямое подключение: положите строку без pooler в `DATABASE_URL_UNPOOLED` (необязательно).
 
 ## Настройка Google
 

@@ -2,16 +2,12 @@ import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import { Client } from "pg";
+import { getDbConfig } from "../plugins/dbConfig";
 
 // npm run migrate — применяет src/db/schema.sql (идемпотентно)
 const run = async () => {
-  const client = new Client({
-    database: process.env.DB_NAME,
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT) || 5432,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-  });
+  // для миграций берём прямое соединение, если задан DATABASE_URL_UNPOOLED
+  const client = new Client(getDbConfig({ unpooled: true }));
 
   // "already exists, skipping" не показываем — только наши сообщения
   client.on("notice", (notice) => {
