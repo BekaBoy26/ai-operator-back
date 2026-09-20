@@ -1,15 +1,12 @@
 import { NextFunction, Request, Response } from "express";
 import z from "zod";
-import { removeUpload } from "../utils/files";
 
 export const validateSchema = (schema: z.ZodType) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const result = schema.safeParse(req.body ?? {});
 
     if (!result.success) {
-      // multer уже сохранил файл: не оставляем сироту на диске
-      if (req.file) removeUpload(`/uploads/${req.file.filename}`);
-
+      // файл (если был) лежит только в памяти запроса — чистить нечего, в Cloudinary ничего не ушло
       const errors = result.error.issues.map((issue) => ({
         path: issue.path.join("."),
         message: issue.message,

@@ -33,7 +33,7 @@ Backend API for **Opero** — a personal workspace with an AI assistant that wor
 
 - Node.js 20 or newer
 - PostgreSQL 14 or newer
-- A Google Cloud project (OAuth client) and a Gemini API key
+- A Google Cloud project (OAuth client), a Gemini API key and a [Cloudinary](https://cloudinary.com) account (avatar storage)
 - Optional: an SMTP account for password-reset e-mails (without it the reset link is printed to the server console)
 
 ## Quick start
@@ -70,6 +70,8 @@ Copy `.env.example` to `.env`.
 | `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | yes | JWT secrets, **at least 32 random characters**, different from each other |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | yes | OAuth client from Google Cloud Console |
 | `GOOGLE_CALLBACK_URL` | yes | `http://localhost:5000/auth/google-callback` (must match the OAuth client exactly) |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | yes for avatars | Cloudinary credentials (Dashboard → API Keys). Server-side only — never put them in the front end. Without them the server starts, but avatar uploads return `503 storage_not_configured` |
+| `CLOUDINARY_FOLDER` | no | Folder inside Cloudinary (default `opero/avatars`); handy to separate production and staging |
 | `GEMINI_API_KEY` | yes | Key for the AI chat |
 | `GEMINI_MODEL` | no | Gemini model name (default `gemini-3.6-flash`) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | no | Outgoing mail for password reset |
@@ -86,6 +88,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 |---|---|
 | `npm run dev` | Development server with auto-reload (nodemon + ts-node) |
 | `npm run migrate` | Applies `src/db/schema.sql` (idempotent) |
+| `npm run migrate:avatars` | One-off: moves old avatars from the local `src/uploads` folder to Cloudinary and rewrites `users.avatar` (`-- --dry-run` to preview, `-- --clear-missing` to blank avatars whose file is gone) |
 | `npm run typecheck` | TypeScript check without emitting files |
 | `npm run build` | Compiles to `dist/` |
 | `npm start` | Runs the compiled server (`node dist/index.js`) |
@@ -145,7 +148,7 @@ Google-related errors carry a `code`: `google_not_connected`, `google_reconnect`
 - **Tokens.** A 15-minute access token (sent as Bearer) and a 7-day refresh token in an `httpOnly` cookie (`path=/auth`). Refresh tokens are stored as SHA-256 hashes in `auth_sessions`, one row per device/tab, and are rotated on every refresh (with a 30-second grace period for parallel tabs). Changing the password ends all sessions.
 - **Google sign-in** never links automatically to an account created with a password (that would allow account takeover). A signed-in user connects Google with the in-app button (`POST /auth/google/connect`, signed `state`).
 - **Rate limiting** (in memory, per IP) on sign-in, registration and password reset.
-- **Uploads:** PNG / JPEG / WebP / GIF up to 5 MB, random file names, content is checked by file signature.
+- **Uploads:** PNG / JPEG / WebP / GIF up to 5 MB; SVG and HTML are rejected. The file is held in memory only, its real content is checked by file signature, and only then is it uploaded to Cloudinary under a random (uuid) name. The database stores the `https://res.cloudinary.com/…` URL, which the browser opens directly. Replacing an avatar deletes the previous image from Cloudinary; Google profile photos are never touched.
 - **AI safety.** Tool inputs are validated with the same schemas as the HTTP API. If mail, calendar or Drive data was read during a turn, sending an e-mail in that same turn is blocked until the user confirms in a new message.
 - Passwords are hashed with bcrypt; secrets are never logged.
 - Google access/refresh tokens are stored in the database as plain text — encrypt the database or the columns in production.
@@ -180,7 +183,8 @@ NODE_ENV=production npm start     # run from the repository root
 - Set `NODE_ENV=production`, strong secrets, `FRONTEND_URL` and `GOOGLE_CALLBACK_URL` with your real HTTPS addresses.
 - If the API and the web client are on different domains, set `COOKIE_SAMESITE=none` (HTTPS required).
 - Put the API behind a reverse proxy (HTTPS, compression). The rate limiter is per process — use a shared store if you run several instances.
-- Uploaded avatars are stored in `src/uploads/` on the server disk (not in git); persist that folder.
+- Avatars are stored in Cloudinary, not on the server disk (Render's disk is ephemeral) — set the three `CLOUDINARY_*` variables in *Render → Environment*. The log line `[storage] Cloudinary ready …` after start confirms they are set.
+- **Migrating old avatars.** Records created before the Cloudinary switch contain paths like `/uploads/<file>`. Those files lived on the old server's disk and are **not** served on Render. Run `npm run migrate:avatars` once on a machine that still has the `src/uploads` folder (against the same database) to upload them and rewrite the records; records whose file is gone can be blanked with `--clear-missing` (the UI then shows the user's initial).
 
 ## Troubleshooting
 
@@ -191,6 +195,7 @@ NODE_ENV=production npm start     # run from the repository root
 | Google asks to reconnect / "missing a permission" | Press "Reconnect Google" in the app (needed after adding a scope, or after 7 days in Testing mode) |
 | `redirect_uri_mismatch` from Google | `GOOGLE_CALLBACK_URL` must match the OAuth client redirect URI exactly |
 | AI replies "daily request limit reached" | Gemini quota is exhausted for the key — wait or use another key / plan |
+| Avatar upload returns `503 storage_not_configured` | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` or `CLOUDINARY_API_SECRET` is missing — the server log names the missing variable |
 | Password-reset e-mail does not arrive | Configure `SMTP_*`; otherwise the link is printed in the server console |
 
 ---
@@ -230,7 +235,7 @@ Backend API для **Opero** — персонального рабочего п�
 
 - Node.js 20 или новее
 - PostgreSQL 14 или новее
-- Проект в Google Cloud (OAuth-клиент) и ключ Gemini API
+- Проект в Google Cloud (OAuth-клиент), ключ Gemini API и аккаунт [Cloudinary](https://cloudinary.com) (хранение аватарок)
 - По желанию: SMTP-аккаунт для писем со сбросом пароля (без него ссылка печатается в консоль сервера)
 
 ## Быстрый старт
@@ -267,6 +272,8 @@ npm run dev              # http://localhost:5000
 | `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | да | Секреты JWT, **не короче 32 случайных символов**, разные между собой |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | да | OAuth-клиент из Google Cloud Console |
 | `GOOGLE_CALLBACK_URL` | да | `http://localhost:5000/auth/google-callback` (должен точно совпадать с адресом в OAuth-клиенте) |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | да, для аватарок | Данные доступа Cloudinary (Dashboard → API Keys). Только на сервере — никогда не кладите их во фронтенд. Без них сервер запустится, но загрузка аватарок вернёт `503 storage_not_configured` |
+| `CLOUDINARY_FOLDER` | нет | Папка внутри Cloudinary (по умолчанию `opero/avatars`); удобно разделять production и staging |
 | `GEMINI_API_KEY` | да | Ключ для ИИ-чата |
 | `GEMINI_MODEL` | нет | Название модели Gemini (по умолчанию `gemini-3.6-flash`) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | нет | Исходящая почта для сброса пароля |
@@ -283,6 +290,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 |---|---|
 | `npm run dev` | Сервер разработки с автоперезапуском (nodemon + ts-node) |
 | `npm run migrate` | Применяет `src/db/schema.sql` (идемпотентно) |
+| `npm run migrate:avatars` | Разовый перенос старых аватарок из локальной папки `src/uploads` в Cloudinary с заменой `users.avatar` (`-- --dry-run` — только показать, `-- --clear-missing` — очистить аватарки, файл которых потерян) |
 | `npm run typecheck` | Проверка типов TypeScript без сборки |
 | `npm run build` | Компиляция в `dist/` |
 | `npm start` | Запуск собранного сервера (`node dist/index.js`) |
@@ -342,7 +350,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 - **Токены.** Access-токен на 15 минут (передаётся как Bearer) и refresh-токен на 7 дней в `httpOnly`-cookie (`path=/auth`). Refresh-токены хранятся как SHA-256-хеши в `auth_sessions`, по строке на устройство/вкладку, и ротируются при каждом обновлении (с 30-секундной «отсрочкой» для параллельных вкладок). Смена пароля завершает все сессии.
 - **Вход через Google** никогда не склеивается автоматически с аккаунтом, созданным по паролю (это позволило бы захватить чужой аккаунт). Уже вошедший пользователь подключает Google кнопкой в приложении (`POST /auth/google/connect`, подписанный `state`).
 - **Ограничение частоты запросов** (в памяти, по IP) на вход, регистрацию и сброс пароля.
-- **Загрузки:** PNG / JPEG / WebP / GIF до 5 МБ, случайные имена файлов, содержимое проверяется по сигнатуре.
+- **Загрузки:** PNG / JPEG / WebP / GIF до 5 МБ; SVG и HTML отклоняются. Файл живёт только в памяти, его реальное содержимое проверяется по сигнатуре, и лишь после этого он загружается в Cloudinary под случайным (uuid) именем. В базе хранится ссылка `https://res.cloudinary.com/…`, которую браузер открывает напрямую. При замене аватарки прежняя картинка удаляется из Cloudinary; фото профиля Google не затрагиваются.
 - **Безопасность ИИ.** Входные данные инструментов проверяются теми же схемами, что и HTTP-API. Если в текущем ходе были прочитаны письма, календарь или Drive, отправка письма в этом же ходе блокируется до подтверждения пользователем в новом сообщении.
 - Пароли хешируются bcrypt; секреты не попадают в логи.
 - Токены Google хранятся в базе открытым текстом — в продакшене шифруйте базу или эти колонки.
@@ -377,7 +385,8 @@ NODE_ENV=production npm start     # запускать из корня репо�
 - Задайте `NODE_ENV=production`, надёжные секреты, `FRONTEND_URL` и `GOOGLE_CALLBACK_URL` с реальными HTTPS-адресами.
 - Если API и веб-клиент на разных доменах, задайте `COOKIE_SAMESITE=none` (нужен HTTPS).
 - Поставьте API за реверс-прокси (HTTPS, сжатие). Лимитер работает на уровне процесса — при нескольких экземплярах используйте общее хранилище.
-- Аватарки хранятся в `src/uploads/` на диске сервера (в git не попадают); сохраняйте эту папку.
+- Аватарки хранятся в Cloudinary, а не на диске сервера (диск Render временный) — задайте три переменные `CLOUDINARY_*` в *Render → Environment*. Строка `[storage] Cloudinary ready …` в логе после старта подтверждает, что они заданы.
+- **Перенос старых аватарок.** Записи, созданные до перехода на Cloudinary, содержат пути вида `/uploads/<файл>`. Эти файлы лежали на диске прежнего сервера и на Render **не отдаются**. Один раз запустите `npm run migrate:avatars` на машине, где ещё есть папка `src/uploads` (с той же базой данных): скрипт загрузит файлы и перепишет записи; записи с потерянным файлом можно очистить флагом `--clear-missing` (в интерфейсе тогда показывается инициал).
 
 ## Решение проблем
 
@@ -388,4 +397,5 @@ NODE_ENV=production npm start     # запускать из корня репо�
 | Google просит переподключиться / «не хватает права» | Нажмите «Reconnect Google» в приложении (нужно после добавления права или через 7 дней в режиме Testing) |
 | `redirect_uri_mismatch` от Google | `GOOGLE_CALLBACK_URL` должен точно совпадать с redirect URI OAuth-клиента |
 | ИИ отвечает «достигнут дневной лимит запросов» | Квота Gemini для ключа исчерпана — подождите или используйте другой ключ / тариф |
+| Загрузка аватарки возвращает `503 storage_not_configured` | Не задана `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` или `CLOUDINARY_API_SECRET` — в логе сервера указано, какая именно |
 | Письмо для сброса пароля не приходит | Настройте `SMTP_*`; иначе ссылка печатается в консоли сервера |

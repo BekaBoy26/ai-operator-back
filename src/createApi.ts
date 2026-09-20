@@ -11,7 +11,7 @@ import contactsRouter from "./routes/contacts.route";
 import dealsRouter from "./routes/deals.route";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
 import { logger } from "./middlewares/logger";
-import { UPLOADS_DIR } from "./utils/files";
+import { LEGACY_UPLOADS_DIR, legacyUploadsAvailable } from "./utils/legacyUploads";
 
 const createApi = () => {
   const app = express();
@@ -36,11 +36,15 @@ const createApi = () => {
   app.use(express.json({ limit: "1mb" }));
   app.use(passport.initialize());
 
-  // имена файлов уникальны (uuid), поэтому их можно кэшировать надолго
-  app.use(
-    "/uploads",
-    express.static(UPLOADS_DIR, { maxAge: "7d", immutable: true, index: false }),
-  );
+  // Только чтение старых аватарок ("/uploads/<файл>" в БД до перехода на Cloudinary).
+  // Новые файлы сюда не пишутся; если папки нет (Render) — маршрут не создаётся.
+  // Удалите после `npm run migrate:avatars`.
+  if (legacyUploadsAvailable()) {
+    app.use(
+      "/uploads",
+      express.static(LEGACY_UPLOADS_DIR, { maxAge: "7d", index: false, dotfiles: "ignore" }),
+    );
+  }
 
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok" });

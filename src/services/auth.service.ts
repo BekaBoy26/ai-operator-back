@@ -3,9 +3,9 @@ import crypto from "crypto";
 import { pool } from "../plugins/pg";
 import { apiErrors } from "../utils/apiErrors";
 import { normalizeEmail } from "../utils/email";
-import { removeUpload } from "../utils/files";
 import { hashToken } from "../utils/generateTokens";
 import { sendMail } from "../utils/mailer";
+import { deleteStoredImage, IUploadedFile, uploadAvatar } from "./imageStorage.service";
 import { endAllSessions, endSession, rotateSession, startSession } from "./session.service";
 
 // 10 раундов (было 8): разумный компромисс между стойкостью и временем входа
@@ -20,7 +20,8 @@ export const registerService = async (body: {
   email: string;
   password: string;
   name: string;
-  avatar: string;
+  // файл аватарки уже проверен (тип, размер, содержимое), но ещё не загружен в Cloudinary
+  avatarFile?: IUploadedFile | undefined;
 }) => {
   const email = normalizeEmail(body.email);
 
@@ -28,6 +29,10 @@ export const registerService = async (body: {
   if (existing.rows[0]) throw emailTaken();
 
   const hashedPass = await bcrypt.hash(body.password, BCRYPT_COST);
+
+  // Загружаем в Cloudinary только когда всё остальное в порядке: занятый email
+  // больше не оставляет в облаке лишний файл.
+  const stored = body.avatarFile ? await uploadAvatar(body.avatarFile) : undefined;
 
   let user;
   try {
@@ -37,10 +42,12 @@ export const registerService = async (body: {
         values ($1, $2, $3, $4)
         returning name, email, id, avatar, created_at
       `,
-      [body.name.trim(), email, hashedPass, body.avatar],
+      [body.name.trim(), email, hashedPass, stored?.url ?? ""],
     );
     user = result.rows[0];
   } catch (error: any) {
+    // регистрация не удалась — загруженная аватарка не нужна
+    await deleteStoredImage(stored?.url);
     // гонка двух одновременных регистраций: сработал unique-индекс
     if (error?.code === "23505") throw emailTaken();
     throw error;
@@ -107,24 +114,34 @@ export const logoutService = (refreshToken: string | undefined) =>
 
 export const updateProfileService = async (
   userId: number,
-  body: { name: string; avatar?: string },
+  body: { name: string; avatarFile?: IUploadedFile | undefined },
 ) => {
   const previous = await pool.query(`select avatar from users where id = $1`, [userId]);
 
-  const result = await pool.query(
-    `
-      update users
-      set name = $1, avatar = coalesce($2, avatar)
-      where id = $3
-      returning name, email, avatar, id, google_id, created_at,
-                (google_access is not null) as google_connected
-    `,
-    [body.name.trim(), body.avatar ?? null, userId],
-  );
+  const stored = body.avatarFile ? await uploadAvatar(body.avatarFile) : undefined;
 
-  // старая локальная аватарка больше не нужна
-  if (body.avatar && previous.rows[0]?.avatar !== body.avatar) {
-    removeUpload(previous.rows[0]?.avatar);
+  let result;
+  try {
+    result = await pool.query(
+      `
+        update users
+        set name = $1, avatar = coalesce($2, avatar)
+        where id = $3
+        returning name, email, avatar, id, google_id, created_at,
+                  (google_access is not null) as google_connected
+      `,
+      [body.name.trim(), stored?.url ?? null, userId],
+    );
+  } catch (error) {
+    // запись в БД не удалась — новый файл в облаке лишний
+    await deleteStoredImage(stored?.url);
+    throw error;
+  }
+
+  // прежняя аватарка заменена — удаляем её из Cloudinary
+  // (для Google-аватарки и старых /uploads/… это ничего не делает)
+  if (stored && previous.rows[0]?.avatar !== stored.url) {
+    await deleteStoredImage(previous.rows[0]?.avatar);
   }
 
   return result.rows[0];

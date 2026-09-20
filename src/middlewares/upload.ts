@@ -1,50 +1,27 @@
-import crypto from "crypto";
-import fs from "fs";
-import multer, { diskStorage } from "multer";
+import multer, { memoryStorage } from "multer";
 import { NextFunction, Request, Response } from "express";
 import { apiErrors } from "../utils/apiErrors";
-import { isRealImage, removeUpload, UPLOADS_DIR } from "../utils/files";
+import { isRealImage } from "../utils/imageSignature";
 
-const EXTENSIONS: Record<string, string> = {
-  "image/png": ".png",
-  "image/jpeg": ".jpg",
-  "image/webp": ".webp",
-  "image/gif": ".gif",
-};
+const ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
-// папка нужна на чистом клоне: multer сам её не создаёт
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-const storage = diskStorage({
-  destination: (_, __, cb) => cb(null, UPLOADS_DIR),
-  filename: (_, file, cb) => {
-    cb(null, `${crypto.randomUUID()}${EXTENSIONS[file.mimetype] ?? ""}`);
-  },
-});
-
+// Файл живёт только в памяти запроса (не более 5 МБ) и нигде на диске не сохраняется:
+// на Render локальный диск временный. В Cloudinary он попадает позже, уже после проверок.
 export const uploadMiddleware = multer({
-  storage,
+  storage: memoryStorage(),
   limits: { fileSize: 1024 * 1024 * 5, files: 1 },
   // svg и html не пускаем: со своего origin они выполняли бы скрипты
   fileFilter: (_req, file, cb) => {
-    if (EXTENSIONS[file.mimetype]) return cb(null, true);
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) return cb(null, true);
     cb(apiErrors.badRequest("Only PNG, JPEG, WebP or GIF images are allowed"));
   },
 });
 
-// проверяем реальное содержимое загруженного файла
-export const verifyUploadedImage = async (
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-) => {
-  try {
-    if (req.file && !(await isRealImage(req.file.path))) {
-      removeUpload(`/uploads/${req.file.filename}`);
-      throw apiErrors.badRequest("The uploaded file is not a valid image");
-    }
-    next();
-  } catch (error) {
-    next(error);
+// проверяем реальное содержимое файла (сигнатуру), а не заявленный клиентом тип
+export const verifyUploadedImage = (req: Request, _res: Response, next: NextFunction) => {
+  if (req.file && !isRealImage(req.file.buffer)) {
+    return next(apiErrors.badRequest("The uploaded file is not a valid image"));
   }
+
+  next();
 };

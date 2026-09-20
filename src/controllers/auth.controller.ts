@@ -11,29 +11,27 @@ import {
 } from "../services/auth.service";
 import { apiErrors } from "../utils/apiErrors";
 import { clearRefreshCookie, setRefreshCookie } from "../utils/cookies";
-import { removeUpload } from "../utils/files";
 import { safeReturnTo, signLinkState } from "../utils/googleState";
 import { userIdOf } from "../utils/request";
 
 export const registerController = async (req: Request, res: Response) => {
   const { email, password, name } = req.body;
-  const avatar = req.file ? `/uploads/${req.file.filename}` : "";
 
-  try {
-    const { user, token } = await registerService({ email, password, name, avatar });
+  // файл лежит в памяти; в Cloudinary он уходит внутри сервиса, после проверки email
+  const { user, token } = await registerService({
+    email,
+    password,
+    name,
+    avatarFile: req.file,
+  });
 
-    setRefreshCookie(res, token.refreshToken);
+  setRefreshCookie(res, token.refreshToken);
 
-    res.status(201).json({
-      message: "Registered successfully",
-      user,
-      accessToken: token.accessToken,
-    });
-  } catch (error) {
-    // регистрация не удалась (например, email занят) — загруженная аватарка не нужна
-    removeUpload(avatar);
-    throw error;
-  }
+  res.status(201).json({
+    message: "Registered successfully",
+    user,
+    accessToken: token.accessToken,
+  });
 };
 
 export const loginController = async (req: Request, res: Response) => {
@@ -68,19 +66,12 @@ export const profileController = async (req: Request, res: Response) => {
 };
 
 export const updateProfileController = async (req: Request, res: Response) => {
-  const avatar = req.file ? `/uploads/${req.file.filename}` : undefined;
+  const result = await updateProfileService(userIdOf(req), {
+    name: req.body.name,
+    avatarFile: req.file,
+  });
 
-  try {
-    const result = await updateProfileService(userIdOf(req), {
-      name: req.body.name,
-      ...(avatar ? { avatar } : {}),
-    });
-
-    res.status(200).json({ message: "Profile updated successfully", data: result });
-  } catch (error) {
-    removeUpload(avatar);
-    throw error;
-  }
+  res.status(200).json({ message: "Profile updated successfully", data: result });
 };
 
 export const logoutController = async (req: Request, res: Response) => {

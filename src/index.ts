@@ -1,5 +1,9 @@
 import "dotenv/config";
 import createApi from "./createApi";
+import { checkCloudinaryConfig } from "./config/cloudinary";
+
+// сразу видно в логах, если переменные Cloudinary не заданы
+checkCloudinaryConfig();
 
 const app = createApi();
 const port = process.env.PORT ? Number(process.env.PORT) : 5000;

@@ -16,7 +16,3 @@ export interface ILoginBody {
   password: string;
 }
 
-export interface IBody extends ILoginBody {
-  name: string;
-  avatar: string;
-}
